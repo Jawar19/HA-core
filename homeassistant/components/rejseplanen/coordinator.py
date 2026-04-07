@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_API_KEY, DOMAIN, SCAN_INTERVAL_MINUTES
+from .const import CONF_API_KEY, CONF_STOP_ID, DOMAIN, SCAN_INTERVAL_MINUTES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ class RejseplanenDataUpdateCoordinator(DataUpdateCoordinator[DepartureBoard]):
 
         self.api = DeparturesAPIClient(auth_key=config_entry.data[CONF_API_KEY])
         self.last_update_success_time: datetime | None = None
+        self._config_entry = config_entry
 
         super().__init__(
             hass,
@@ -45,8 +46,14 @@ class RejseplanenDataUpdateCoordinator(DataUpdateCoordinator[DepartureBoard]):
 
     async def _async_update_data(self) -> DepartureBoard:
         """Update data via library."""
+        # Capture stop_ids on the event loop before handing off to executor
+        stop_ids = [
+            subentry.data[CONF_STOP_ID]
+            for subentry in self._config_entry.subentries.values()
+            if subentry.subentry_type == "stop"
+        ]
         try:
-            board = await self.hass.async_add_executor_job(self._fetch_data)
+            board = await self.hass.async_add_executor_job(self._fetch_data, stop_ids)
         except (
             APIError,
             HTTPError,
@@ -57,17 +64,16 @@ class RejseplanenDataUpdateCoordinator(DataUpdateCoordinator[DepartureBoard]):
                 f"Connection error while fetching data: {error}"
             ) from error
         except TypeError as error:
-            stop_ids = {context.stop_id for context in self.async_contexts()}
             raise UpdateFailed(
-                f"Type error fetching data for stop {stop_ids}: {error}"
+                f"Type error fetching data for stops {stop_ids}: {error}"
             ) from error
 
         self.last_update_success_time = dt_util.now()
         return board
 
-    def _fetch_data(self) -> DepartureBoard:
+    def _fetch_data(self, stop_ids: list[int]) -> DepartureBoard:
         """Fetch data from Rejseplanen API."""
-        if not self.async_contexts():
+        if not stop_ids:
             _LOGGER.warning(
                 "No stops registered, Please add a stop through the UI configuration. Data not fetched"
             )
@@ -79,10 +85,8 @@ class RejseplanenDataUpdateCoordinator(DataUpdateCoordinator[DepartureBoard]):
                 technicalMessages=[],
                 departures=[],
             )
-        # Get all departures for this stop
-        stop_ids = {context.stop_id for context in self.async_contexts()}
         _LOGGER.debug("Fetching data for stop IDs: %s", stop_ids)
-        departure_board, _ = self.api.get_departures(list(stop_ids))
+        departure_board, _ = self.api.get_departures(stop_ids)
         return departure_board
 
     def get_filtered_departures(
@@ -118,8 +122,8 @@ class RejseplanenDataUpdateCoordinator(DataUpdateCoordinator[DepartureBoard]):
         # Sort by due_in time
         filtered_data.sort(
             key=lambda x: (
-                x.rtDate if x.rtDate else x.date,
-                x.rtTime if x.rtTime else x.time,
+                x.rtDate or x.date,
+                x.rtTime or x.time,
             ),
         )
         now = dt_util.now().replace(tzinfo=None)
@@ -127,7 +131,7 @@ class RejseplanenDataUpdateCoordinator(DataUpdateCoordinator[DepartureBoard]):
         # Find the index where the departure time is not in the past
         def departure_datetime(d: Departure) -> datetime:
             return datetime.strptime(
-                f"{d.rtDate if d.rtDate else d.date} {d.rtTime if d.rtTime else d.time}",
+                f"{d.rtDate or d.date} {d.rtTime or d.time}",
                 "%Y-%m-%d %H:%M:%S",
             )
 
