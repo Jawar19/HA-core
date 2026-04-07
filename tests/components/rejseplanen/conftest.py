@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import zoneinfo
 
 from py_rejseplan.api.departures import DeparturesAPIClient
-from py_rejseplan.dataclasses.departure import DepartureType
+from py_rejseplan.dataclasses.departure import Departure
 from py_rejseplan.enums import TransportClass
 import pytest
 
@@ -25,7 +25,7 @@ from homeassistant.core import HomeAssistant
 from tests.common import MockConfigEntry
 
 
-def make_mock_departures(stop_id: int) -> list[DepartureType]:
+def make_mock_departures(stop_id: int) -> list[Departure]:
     """Create mock departures for a specific stop."""
     # Use a fixed base time for deterministic test data
     base_time = datetime(2024, 1, 1, 12, 0, 0)
@@ -33,7 +33,7 @@ def make_mock_departures(stop_id: int) -> list[DepartureType]:
         # Example: 2 departures for "Work"
         departures = []
         for i, (name, line) in enumerate([("Bus 207", "207"), ("Bus 216", "216")]):
-            mock_departure = MagicMock(spec=DepartureType)
+            mock_departure = MagicMock(spec=Departure)
             mock_departure.name = name
             mock_departure.line = line
             mock_departure.type = TransportClass.BUS
@@ -61,7 +61,7 @@ def make_mock_departures(stop_id: int) -> list[DepartureType]:
         return departures
     if stop_id == 456789:
         # Example: 1 departure for "Gym"
-        mock_departure = MagicMock(spec=DepartureType)
+        mock_departure = MagicMock(spec=Departure)
         mock_departure.name = "A"
         mock_departure.type = TransportClass.BUS
         mock_departure.cls_id = 1
@@ -100,7 +100,7 @@ def mock_subentries() -> list[ConfigSubentryDataWithId]:
     return [
         ConfigSubentryDataWithId(
             data={
-                CONF_STOP_ID: "123456",
+                CONF_STOP_ID: 123456,
                 CONF_NAME: "Work",
                 CONF_DIRECTION: [],
                 CONF_DEPARTURE_TYPE: [],
@@ -112,7 +112,7 @@ def mock_subentries() -> list[ConfigSubentryDataWithId]:
         ),
         ConfigSubentryDataWithId(
             data={
-                CONF_STOP_ID: "456789",
+                CONF_STOP_ID: 456789,
                 CONF_NAME: "Gym",
                 CONF_DIRECTION: ["North"],
                 CONF_DEPARTURE_TYPE: [],
@@ -163,7 +163,17 @@ def mock_rejseplanen_coordinator(hass: HomeAssistant) -> Generator[Mock]:
         def get_filtered_departures(stop_id, *args, **kwargs):
             return make_mock_departures(int(stop_id))
 
+        def get_departures(stop_ids, *args, **kwargs):
+            all_departures = []
+            for stop_id in stop_ids:
+                all_departures.extend(make_mock_departures(int(stop_id)))
+            mock_board = MagicMock()
+            mock_board.departures = all_departures
+            return (mock_board, MagicMock())
+
         mock_api.get_filtered_departures = Mock(side_effect=get_filtered_departures)
+        mock_api.get_departures = Mock(side_effect=get_departures)
+        mock_api.calculate_departure_type_bitflag = Mock(return_value=0)
         yield mock_api
 
 
@@ -186,11 +196,11 @@ async def mock_setup_integration(
 
 @pytest.fixture
 def patch_sensor_now():
-    """Patch datetime.now() and dt_util.now() in the sensor module to return a fixed datetime."""
+    """Patch datetime.now() and dt_util.now/utcnow() in the sensor module to return a fixed datetime."""
     fixed_now = datetime(
         2024, 1, 1, 12, 0, 0, tzinfo=zoneinfo.ZoneInfo("Europe/Copenhagen")
     )
-    # Patch both datetime.now and dt_util.now in the sensor module
+    fixed_utcnow = datetime(2024, 1, 1, 11, 0, 0, tzinfo=zoneinfo.ZoneInfo("UTC"))
     with (
         patch(
             "homeassistant.components.rejseplanen.sensor.datetime", wraps=datetime
@@ -198,6 +208,10 @@ def patch_sensor_now():
         patch(
             "homeassistant.components.rejseplanen.sensor.dt_util.now",
             return_value=fixed_now,
+        ),
+        patch(
+            "homeassistant.components.rejseplanen.sensor.dt_util.utcnow",
+            return_value=fixed_utcnow,
         ),
     ):
         mock_dt.now.return_value = fixed_now
