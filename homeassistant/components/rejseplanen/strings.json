@@ -28,7 +28,18 @@
       },
       "step": {
         "user": {
-          "description": "Set up stop subentry for Rejseplanen, see the [documentation](https://www.home-assistant.io/integrations/rejseplanen/) for information on obtaining the stop id.",
+          "data": {
+            "departure_type": "Departure type filter",
+            "direction": "Direction filter",
+            "name": "[%key:common::config_flow::data::name%]",
+            "stop_id": "Stop ID"
+          },
+          "data_description": {
+            "departure_type": "Only show selected transport types. Leave empty for all.",
+            "direction": "Only show departures towards these destinations. Leave empty for all.",
+            "stop_id": "The numeric ID of the stop from Rejseplanen."
+          },
+          "description": "Set up a stop to monitor departures from. You can find the stop ID using the Rejseplanen website or app.",
           "title": "Add Stop"
         }
       }

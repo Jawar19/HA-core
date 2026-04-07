@@ -175,8 +175,10 @@ SENSORS: tuple[RejseplanenSensorEntityDescription, ...] = (
         key="track",
         translation_key="track",
         value_fn=lambda departures, tz: (
-            _get_current_departures(departures, tz)[0].rtTrack
-            or _get_current_departures(departures, tz)[0].track
+            (
+                _get_current_departures(departures, tz)[0].rtTrack
+                or _get_current_departures(departures, tz)[0].track
+            )
             if _get_current_departures(departures, tz)
             else None
         ),
@@ -331,11 +333,15 @@ class RejseplanenTransportSensor(RejseplanenEntity, SensorEntity):
         )
         return self.entity_description.value_fn(departures, tz)
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra state attributes."""
+        return {"stop_id": str(self._stop_id)}
 
     def _get_filtered_departures(self) -> list[Departure]:
         """Get filtered departures based on the configured parameters."""
         return self.coordinator.get_filtered_departures(
             stop_id=self._stop_id,
-            direction_filter=self._direction if self._direction else None,
+            direction_filter=self._direction or None,
             departure_type_filter=self._departure_type_bitflag,
         )
